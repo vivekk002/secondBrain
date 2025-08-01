@@ -41,15 +41,6 @@ const userSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters long"),
 });
 
-// const contantSchema = z.object({
-//   link: z.string().url("Invalid URL format"),
-//   type: z.enum(["image", "article", "link", "audio"], {
-//     message: "Type must be one of the following: image, article, link, audio",
-//   }),
-//   title: z.string().min(1, "Title is required"),
-//   tags: z.array(z.string()).optional(), // Assuming tags are strings, adjust as necessary
-// });
-
 //generate JWT token
 function generateToken(userId: string): string {
   // You can include other claims in the payload as needed
@@ -129,21 +120,6 @@ app.post("/api/v1/signin", async (req, res) => {
 //Add new content routes
 app.post("/api/v1/content", middleware, async (req, res) => {
   const { link, type, title } = req.body;
-
-  // Validate the request body
-  //   const validContant = contantSchema.safeParse({
-  //     link,
-  //     type,
-  //     title,
-  //     tags,
-  //   });
-  //   if (!validContant.success) {
-  //     return res.status(400).json({
-  //       error: validContant.error.message,
-  //       issues: validContant.error.issues,
-  //     });
-  //   }
-  // Logic to handle adding new content
 
   // Create a new content entry
   const newContent = await ContantModel.create({

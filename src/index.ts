@@ -6,7 +6,7 @@ import jwt from "jsonwebtoken";
 
 require("dotenv").config();
 import { UserModel, TagModel, ContantModel, LinkModel } from "./database";
-import middleware from "./middleware";
+import authMiddleware from "./middleware";
 const app = express();
 
 const PORT = process.env.PORT || 3000;
@@ -118,7 +118,7 @@ app.post("/api/v1/signin", async (req, res) => {
 });
 
 //Add new content routes
-app.post("/api/v1/content", middleware, async (req, res) => {
+app.post("/api/v1/content", authMiddleware, async (req, res) => {
   const { link, type, title } = req.body;
 
   // Create a new content entry
@@ -140,7 +140,7 @@ app.post("/api/v1/content", middleware, async (req, res) => {
 });
 
 //Get all content routes
-app.get("/api/v1/content", middleware, async (req, res) => {
+app.get("/api/v1/content", authMiddleware, async (req, res) => {
   // Logic to handle fetching all content
   //@ts-ignore
   const contents = await ContantModel.find({ userId: req.userId }).populate(
@@ -154,7 +154,7 @@ app.get("/api/v1/content", middleware, async (req, res) => {
 });
 
 //Delete content by ID routes
-app.delete("/api/v1/content/:contentId", middleware, async (req, res) => {
+app.delete("/api/v1/content/:contentId", authMiddleware, async (req, res) => {
   const contentId = req.params.contentId;
   if (!contentId) {
     return res.status(400).json({ error: "Content ID is required" });

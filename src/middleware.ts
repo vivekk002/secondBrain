@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 const JWT_SECRET = "vivek054054"; // Ideally, this should be stored in an environment variable
 
-const middleware = (req: Request, res: Response, next: NextFunction) => {
+const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   // Middleware logic can be added here
   const header = req.headers["authorization"];
   if (!header) {
@@ -22,4 +22,4 @@ const middleware = (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-export default middleware;
+export default authMiddleware;

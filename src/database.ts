@@ -24,18 +24,7 @@ const tagScema = new mongoose.Schema({
   },
 });
 
-const contantTypes = [
-  "youtube",
-  "twitter",
-  "instagram",
-  "facebook",
-  "linkedin",
-  "threads",
-  "reddit",
-  "medium",
-  "pinterest",
-  "spotify",
-];
+const contantTypes = ["youtube", "twitter", "reddit", "pinterest", "spotify"];
 
 const Contant = new mongoose.Schema({
   link: {

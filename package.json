@@ -13,8 +13,10 @@
   "description": "��#\u0000 \u0000s\u0000e\u0000c\u0000o\u0000n\u0000d\u0000-\u0000b\u0000r\u0000a\u0000i\u0000n\u0000\r\u0000 \u0000",
   "dependencies": {
     "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "env": "^0.0.2",
     "express": "^5.1.0",

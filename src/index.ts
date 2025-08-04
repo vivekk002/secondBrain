@@ -3,14 +3,19 @@ import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
+import cors from "cors";
 
 require("dotenv").config();
 import { UserModel, TagModel, ContantModel, LinkModel } from "./database";
-import authMiddleware from "./middleware";
+import authMiddleware, { addToBlacklist } from "./middleware";
+import { hashContent } from "./utils";
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = "vivek054054"; // Ideally, this should be stored in an environment variable
+
+// Token blacklist to store invalidated tokens
+const tokenBlacklist = new Set<string>();
 
 mongoose
   .connect(
@@ -19,6 +24,7 @@ mongoose
   .then(() => console.log("Connected to MongoDB!"))
   .catch((err) => console.error(err));
 
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.listen(PORT, () => {
@@ -36,26 +42,30 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 //zod validation schema
-const userSchema = z.object({
+const signUpSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(8, "Password must be at least 8 characters long"),
+});
+const signInSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(8, "Password must be at least 8 characters long"),
 });
 
 //generate JWT token
 function generateToken(userId: string): string {
-  // You can include other claims in the payload as needed
   const payload = { id: userId };
 
   // Generate a token valid for 1 hour (3600 seconds)
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" });
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
   return token;
 }
 
 //SignUp routes
 app.post("/api/v1/signup", async (req, res) => {
-  const { username, password } = req.body;
+  const { name, username, password } = req.body;
 
-  const validation = userSchema.safeParse({ username, password });
+  const validation = signUpSchema.safeParse({ name, username, password });
   if (!validation.success) {
     return res.status(400).json({
       error: validation.error.message,
@@ -69,25 +79,25 @@ app.post("/api/v1/signup", async (req, res) => {
   }
 
   // Hash the password before saving
-  const hashedPassword = await hashPassword(password); // Ideally, you should hash the password before saving
+  const hashedPassword = await hashPassword(password);
 
   // Create a new user
-  await UserModel.create({ username: username, password: hashedPassword });
+  await UserModel.create({
+    name: name,
+    username: username,
+    password: hashedPassword,
+  });
   // Logic to handle user signup
 
   res.status(201).json({
-    data: { username, password: hashedPassword },
     message: "User signed up successfully",
   });
-
-  console.log("User signed up:", username);
-  console.log("Hashed password:", hashedPassword);
 });
 
 //SignIn routes
 app.post("/api/v1/signin", async (req, res) => {
   const { username, password } = req.body;
-  const validation = userSchema.safeParse({ username, password });
+  const validation = signInSchema.safeParse({ username, password });
   if (!validation.success) {
     return res.status(400).json({
       error: validation.error.message,
@@ -106,25 +116,35 @@ app.post("/api/v1/signin", async (req, res) => {
     return res.status(401).json({ error: "Invalid password" });
   } else {
     const token = generateToken(user[0]._id.toString());
-    console.log("Generated JWT Token:", token);
+
+    res.status(200).json({
+      username: user[0].username,
+      token: token,
+      message: "User signed in successfully",
+    });
   }
 
   // Logic to handle user sign-in
-  res.status(200).json({
-    data: { username: user[0].username },
-    message: "User signed in successfully",
-  });
-  console.log("User signed in:", user[0].username);
+});
+
+//logout route
+app.post("/api/v1/logout", authMiddleware, async (req, res) => {
+  const token = req.headers.authorization;
+  if (token) {
+    addToBlacklist(token);
+    console.log("Token blacklisted:", token);
+  }
+  res.status(200).json({ message: "Logged out successfully" });
 });
 
 //Add new content routes
 app.post("/api/v1/content", authMiddleware, async (req, res) => {
-  const { link, type, title } = req.body;
+  const { link, contentType, title } = req.body;
 
   // Create a new content entry
   const newContent = await ContantModel.create({
     link,
-    type,
+    contentType,
     title,
     //@ts-ignore
     userId: req.userId,
@@ -148,7 +168,7 @@ app.get("/api/v1/content", authMiddleware, async (req, res) => {
     "username"
   );
   res.status(200).json({
-    data: contents,
+    contents,
     message: "Content fetched successfully",
   });
 });
@@ -165,20 +185,142 @@ app.delete("/api/v1/content/:contentId", authMiddleware, async (req, res) => {
       //@ts-ignore
       userId: req.userId,
     });
+
+    if (!content) {
+      return res.status(404).json({ error: "Content not found" });
+    }
+
+    res.status(200).json({
+      message: "Content deleted successfully",
+    });
+    console.log("Content deleted:", contentId);
   } catch (error) {
     console.error("Error deleting content:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
-  res.status(200).json({
-    message: "Content deleted successfully",
-  });
-  console.log("Content deleted:", contentId);
+});
+
+//Share individual content route
+app.post(
+  "/api/v1/content/:contentId/share",
+  authMiddleware,
+  async (req, res) => {
+    const contentId = req.params.contentId;
+    if (!contentId) {
+      return res.status(400).json({ error: "Content ID is required" });
+    }
+
+    try {
+      const content = await ContantModel.findOne({
+        _id: contentId,
+        //@ts-ignore
+        userId: req.userId,
+      });
+
+      if (!content) {
+        return res.status(404).json({ error: "Content not found" });
+      }
+
+      // Generate a unique share link for this content
+      const shareHash = hashContent(8);
+      const shareLink = `http://localhost:3000/api/v1/content/share/${shareHash}`;
+
+      // Store the share link in the content
+      await ContantModel.findByIdAndUpdate(contentId, {
+        shareLink: shareLink,
+        shareHash: shareHash,
+      });
+
+      res.status(200).json({
+        shareLink: shareLink,
+        message: "Content shared successfully",
+      });
+    } catch (error) {
+      console.error("Error sharing content:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+//Get shared content by hash
+app.get("/api/v1/content/share/:hash", async (req, res) => {
+  const { hash } = req.params;
+
+  try {
+    const content = await ContantModel.findOne({ shareHash: hash });
+
+    if (!content) {
+      return res.status(404).json({ error: "Shared content not found" });
+    }
+
+    res.status(200).json({
+      content: content,
+      message: "Shared content retrieved successfully",
+    });
+  } catch (error) {
+    console.error("Error retrieving shared content:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 //Get a sharable link by ID routes
-app.get("/api/v1/brain/share", async (req, res) => {});
+app.post("/api/v1/brain/share", authMiddleware, async (req, res) => {
+  const { share } = req.body;
+
+  if (share) {
+    //@ts-ignore
+    const existingLink = await LinkModel.findOne({ userId: req.userId });
+    if (existingLink) {
+      const hash = existingLink.hash;
+      return res.status(200).json({
+        message: "Sharable link already exists",
+        shareLink: `http://localhost:3000/api/v1/brain/${hash}`,
+      });
+    } else {
+      const hash = hashContent(10);
+      const newLink = await LinkModel.create({
+        hash,
+        //@ts-ignore
+        userId: req.userId,
+      });
+
+      return res.status(200).json({
+        message: "Sharable link created successfully",
+        shareLink: `http://localhost:3000/api/v1/brain/${hash}`,
+      });
+    }
+  } else {
+    //@ts-ignore
+    await LinkModel.deleteOne({ userId: req.userId });
+
+    return res.status(200).json({
+      message: "Sharable link removed successfully",
+      shareLink: null,
+    });
+  }
+});
 
 //Get sharable links routes
-app.get("/api/v1/brain/:sharelink", async (req, res) => {});
+app.get("/api/v1/brain/:sharelink", async (req, res) => {
+  const { sharelink } = req.params;
+  console.log("Received sharelink:", sharelink);
+
+  if (!sharelink) {
+    return res.status(400).json({ error: "Sharable link is required" });
+  }
+  const Link = await LinkModel.findOne({ hash: sharelink });
+  if (!Link) {
+    return res
+      .status(404)
+      .json({ error: "either the link not exit or it's incorrect" });
+  }
+  const contents = await ContantModel.find({ userId: Link.userId });
+  const user = await UserModel.findOne({ _id: Link.userId });
+  res.status(200).json({
+    name: user?.name,
+    contents,
+    message: "Sharable link contents fetched successfully",
+  });
+});
 
 export default app;

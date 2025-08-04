@@ -10,6 +10,10 @@ const User = new mongoose.Schema({
     type: String,
     required: true,
   },
+  name: {
+    type: String,
+    required: true,
+  },
 });
 
 const tagScema = new mongoose.Schema({
@@ -20,7 +24,18 @@ const tagScema = new mongoose.Schema({
   },
 });
 
-const contantTypes = ["image", "article", "link", "audio"];
+const contantTypes = [
+  "youtube",
+  "twitter",
+  "instagram",
+  "facebook",
+  "linkedin",
+  "threads",
+  "reddit",
+  "medium",
+  "pinterest",
+  "spotify",
+];
 
 const Contant = new mongoose.Schema({
   link: {
@@ -28,15 +43,23 @@ const Contant = new mongoose.Schema({
     required: true,
     unique: true,
   },
-  type: { type: String, enum: contantTypes, required: true },
+  contentType: { type: String, enum: contantTypes, required: true },
   title: { type: String, required: true },
   tags: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tag" }],
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  shareLink: { type: String },
+  shareHash: { type: String },
+  createdAt: { type: Date, default: Date.now },
 });
 
 const linkSchema = new mongoose.Schema({
   hash: { type: String, required: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+    unique: true,
+  },
 });
 
 export const UserModel = mongoose.model("User", User);

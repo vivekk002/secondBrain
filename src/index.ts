@@ -4,23 +4,26 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
 import cors from "cors";
-
 require("dotenv").config();
+
 import { UserModel, TagModel, ContantModel, LinkModel } from "./database";
 import authMiddleware, { addToBlacklist } from "./middleware";
 import { hashContent } from "./utils";
 const app = express();
 
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = "vivek054054"; // Ideally, this should be stored in an environment variable
+const PORT = process.env.PORT;
+const jwtsecret: string = (() => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("Missing JWT_SECRET");
+  }
 
-// Token blacklist to store invalidated tokens
+  return process.env.JWT_SECRET;
+})();
+
 const tokenBlacklist = new Set<string>();
-
+const mongourl = process.env.MONGOURL!;
 mongoose
-  .connect(
-    "mongodb+srv://vivek054:vivek054054@cluster0.hyhgqop.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-  )
+  .connect(mongourl)
   .then(() => console.log("Connected to MongoDB!"))
   .catch((err) => console.error(err));
 
@@ -57,7 +60,7 @@ function generateToken(userId: string): string {
   const payload = { id: userId };
 
   // Generate a token valid for 1 hour (3600 seconds)
-  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
+  const token = jwt.sign(payload, jwtsecret, { expiresIn: "24h" });
   return token;
 }
 

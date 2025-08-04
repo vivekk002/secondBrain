@@ -1,7 +1,13 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = "vivek054054"; // Ideally, this should be stored in an environment variable
+const jwtsecret: string = (() => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("Missing JWT_SECRET");
+  }
+
+  return process.env.JWT_SECRET;
+})(); // Ideally, this should be stored in an environment variable
 
 // Token blacklist (in a real app, this should be in Redis or database)
 let tokenBlacklist: Set<string> = new Set();
@@ -30,7 +36,7 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   }
 
   try {
-    const validToken = jwt.verify(token, JWT_SECRET) as {
+    const validToken = jwt.verify(token, jwtsecret) as {
       id: string;
     };
     // Attach the user id to request object

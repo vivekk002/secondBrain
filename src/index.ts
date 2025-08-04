@@ -161,7 +161,7 @@ app.post("/api/v1/content", authMiddleware, async (req, res) => {
 
 //Get all content routes
 app.get("/api/v1/content", authMiddleware, async (req, res) => {
-  // Logic to handle fetching all content
+  //
   //@ts-ignore
   const contents = await ContantModel.find({ userId: req.userId }).populate(
     "userId",

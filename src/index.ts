@@ -121,6 +121,7 @@ app.post("/api/v1/signin", async (req, res) => {
     const token = generateToken(user[0]._id.toString());
 
     res.status(200).json({
+      name: user[0].name,
       username: user[0].username,
       token: token,
       message: "User signed in successfully",

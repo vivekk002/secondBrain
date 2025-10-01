@@ -16,11 +16,24 @@ const User = new mongoose.Schema({
   },
 });
 
-const tagScema = new mongoose.Schema({
-  title: {
+const Tag = new mongoose.Schema({
+  name: {
     type: String,
     required: true,
     unique: true,
+    lowercase: true,
+    trim: true,
+  },
+  contentId: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Contant",
+      required: true,
+    },
+  ],
+  createdAt: {
+    type: Date,
+    default: Date.now,
   },
 });
 
@@ -34,7 +47,6 @@ const Contant = new mongoose.Schema({
   },
   contentType: { type: String, enum: contantTypes, required: true },
   title: { type: String, required: true },
-  tags: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tag" }],
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   shareLink: { type: String },
   shareHash: { type: String },
@@ -52,7 +64,7 @@ const linkSchema = new mongoose.Schema({
 });
 
 export const UserModel = mongoose.model("User", User);
-export const TagModel = mongoose.model("Tag", tagScema);
+export const TagModel = mongoose.model("Tag", Tag);
 export const ContantModel = mongoose.model("Contant", Contant);
 export const LinkModel = mongoose.model("Link", linkSchema);
 export default {

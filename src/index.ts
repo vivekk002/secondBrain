@@ -52,7 +52,7 @@ const signUpSchema = z.object({
 });
 const signInSchema = z.object({
   username: z.string().min(1, "Username is required"),
-  password: z.string().min(8, "Password must be at least 8 characters long"),
+  password: z.string().min(8, "Password is wrong"),
 });
 
 //generate JWT token
@@ -60,7 +60,7 @@ function generateToken(userId: string): string {
   const payload = { id: userId };
 
   // Generate a token valid for 1 hour (3600 seconds)
-  const token = jwt.sign(payload, jwtsecret, { expiresIn: "24h" });
+  const token = jwt.sign(payload, jwtsecret, { expiresIn: "30min" });
   return token;
 }
 
@@ -100,6 +100,8 @@ app.post("/api/v1/signup", async (req, res) => {
 //SignIn routes
 app.post("/api/v1/signin", async (req, res) => {
   const { username, password } = req.body;
+  console.log(req.body);
+
   const validation = signInSchema.safeParse({ username, password });
   if (!validation.success) {
     return res.status(400).json({
@@ -143,24 +145,45 @@ app.post("/api/v1/logout", authMiddleware, async (req, res) => {
 
 //Add new content routes
 app.post("/api/v1/content", authMiddleware, async (req, res) => {
-  const { link, contentType, title } = req.body;
+  try {
+    const { link, contentType, title, tags } = req.body;
 
-  // Create a new content entry
-  const newContent = await ContantModel.create({
-    link,
-    contentType,
-    title,
-    //@ts-ignore
-    userId: req.userId,
-    tags: [], // Assuming req.userId is set by middleware
-    // Assuming req.userId is set by middleware
-  });
+    // Validate required fields
+    if (!link || !contentType || !title || !tags) {
+      return res.status(400).json({
+        error:
+          "Missing required fields: link, contentType, and title are required",
+      });
+    }
 
-  console.log("New content added:", newContent);
-  res.status(201).json({
-    data: newContent,
-    message: "Content added successfully",
-  });
+    // Create a new content entry
+    const newContent = await ContantModel.create({
+      link,
+      contentType,
+      title,
+      //@ts-ignore
+      userId: req.userId,
+    });
+
+    for (const tag of tags) {
+      const normalizedName = String(tag).toLowerCase().trim();
+      await TagModel.findOneAndUpdate(
+        { name: normalizedName },
+        { $addToSet: { contentId: newContent._id } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    }
+
+    res.status(201).json({
+      data: newContent,
+      message: "Content added successfully",
+    });
+  } catch (error: any) {
+    console.error("Error adding content:", error.errorResponse.errmsg);
+    res.status(500).json({
+      error: error,
+    });
+  }
 });
 
 //Get all content routes
@@ -171,8 +194,12 @@ app.get("/api/v1/content", authMiddleware, async (req, res) => {
     "userId",
     "username"
   );
+
+  const tags = await TagModel.find();
+
   res.status(200).json({
     contents,
+    tags,
     message: "Content fetched successfully",
   });
 });
@@ -189,6 +216,12 @@ app.delete("/api/v1/content/:contentId", authMiddleware, async (req, res) => {
       //@ts-ignore
       userId: req.userId,
     });
+    await TagModel.updateMany(
+      {
+        contentId: content?._id,
+      },
+      { $pull: { contentId: contentId } }
+    );
 
     if (!content) {
       return res.status(404).json({ error: "Content not found" });

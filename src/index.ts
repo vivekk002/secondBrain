@@ -359,5 +359,25 @@ app.get("/api/v1/brain/:sharelink", async (req, res) => {
     message: "Sharable link contents fetched successfully",
   });
 });
+app.post("/api/v1/reset-password", async (req, res) => {
+  try {
+    const { username, newPassword } = req.body;
+
+    if (!username || !newPassword) {
+      return res.status(400).json({ error: "fill the required fields" });
+    }
+    const user = await UserModel.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const hashedPassword = await hashPassword(newPassword);
+    user.password = hashedPassword;
+    await UserModel.updateOne({ _id: user._id }, { password: hashedPassword });
+    return res.status(200).json({ message: "Password updated" });
+  } catch (error) {
+    console.log("error during password reset", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default app;

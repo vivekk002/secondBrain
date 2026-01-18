@@ -51,6 +51,9 @@ const Contant = new mongoose.Schema({
   shareLink: { type: String },
   shareHash: { type: String },
   createdAt: { type: Date, default: Date.now },
+  transcription: { type: String},
+  vectorDB: {type:String},
+  aiChat: {type:String}
 });
 
 const linkSchema = new mongoose.Schema({

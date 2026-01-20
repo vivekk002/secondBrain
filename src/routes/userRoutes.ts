@@ -4,6 +4,7 @@ import { z } from "zod";
 import jwt from "jsonwebtoken";
 import { UserModel } from "../database";
 import authMiddleware, { addToBlacklist } from "../middleware";
+import { AuthenticatedRequest } from "../utils/types";
 
 const router = express.Router();
 
@@ -106,9 +107,9 @@ const updateProfileSchema = z.object({
   profilePicture: z.string().url().optional(),
 });
 
-router.get("/me", authMiddleware, async (req, res) => {
+router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.userId;
     const user = await UserModel.findById(userId).select("-password -__v");
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -140,9 +141,9 @@ router.put(
   "/update",
   authMiddleware,
   upload.single("profilePicture"),
-  async (req, res) => {
+  async (req: AuthenticatedRequest, res) => {
     try {
-      const userId = (req as any).userId;
+      const userId = req.userId;
       const { username, email, bio } = req.body;
       let { profilePicture } = req.body;
 

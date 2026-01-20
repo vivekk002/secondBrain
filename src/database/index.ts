@@ -49,14 +49,7 @@ const Tag = new mongoose.Schema({
   },
 });
 
-const contantTypes = [
-  "youtube",
-  "pdf",
-  "doc",
-  "image",
-  "article",
-  "spreadsheets",
-];
+const contantTypes = ["youtube", "pdf", "doc", "image", "article"];
 
 const Contant = new mongoose.Schema({
   link: {

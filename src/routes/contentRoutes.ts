@@ -17,14 +17,7 @@ const router = express.Router();
 const ContentSchema = z
   .object({
     link: z.string().optional(),
-    contentType: z.enum([
-      "youtube",
-      "pdf",
-      "doc",
-      "image",
-      "article",
-      "spreadsheets",
-    ]),
+    contentType: z.enum(["youtube", "pdf", "doc", "image", "article"]),
     title: z.string().min(1, "Title is required"),
     tags: z.union([z.string(), z.array(z.string())]).transform((val) => {
       return typeof val === "string" ? [val] : val;

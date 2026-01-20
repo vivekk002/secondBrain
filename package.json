@@ -21,6 +21,7 @@
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.9.0",
+    "convertapi": "^1.15.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "env": "^0.0.2",
@@ -33,7 +34,6 @@
     "openai": "^6.16.0",
     "pdf-parse": "^2.4.5",
     "tesseract.js": "^7.0.0",
-    "xlsx": "^0.18.5",
     "youtube-transcript-plus": "^1.1.2",
     "zod": "^4.0.14"
   },

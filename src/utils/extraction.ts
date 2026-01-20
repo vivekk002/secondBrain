@@ -1,10 +1,11 @@
 import fs from "fs";
-import { PDFParse } from "pdf-parse";
+import * as pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import Tesseract from "tesseract.js";
 import { YoutubeTranscript } from "youtube-transcript-plus";
-import * as xlsx from "xlsx";
 import { TranscriptItem } from "./types";
+
+const pdf = (pdfParse as any).default || pdfParse;
 
 export const extractContent = async (
   file: Express.Multer.File | string | Buffer,
@@ -16,10 +17,10 @@ export const extractContent = async (
   }
 
   if (Buffer.isBuffer(file)) {
-    if (type === "pdf") {
+    if (type === "pdf" || type === "doc") {
+      // Handle both PDF and converted Office documents (which are now PDFs)
       try {
-        const parser = new PDFParse({ data: file });
-        const data: any = await parser.getText();
+        const data: any = await pdf(file);
         return data.text || "";
       } catch (e) {
         console.error("PDF Buffer Extraction Error:", e);
@@ -37,9 +38,8 @@ export const extractContent = async (
 
     if (type === "pdf") {
       const dataBuffer = fs.readFileSync(filePath);
-      const parser = new PDFParse({ data: dataBuffer });
       try {
-        const data: any = await parser.getText();
+        const data: any = await pdf(dataBuffer);
         console.log("PDF Metadata:", {
           numpages: data.numpages,
           info: data.info,
@@ -52,13 +52,29 @@ export const extractContent = async (
       }
     }
 
-    if (type === "docx" || type === "doc") {
+    if (type === "doc") {
+      // Office files are converted to PDF before upload
+      // So we need to extract from the PDF, not the original file
+      // The file at this point might be the converted PDF
+      const dataBuffer = fs.readFileSync(filePath);
+
+      // Try PDF extraction first (for converted files)
       try {
-        const result = await mammoth.extractRawText({ path: filePath });
-        return result.value;
-      } catch (err) {
-        console.warn("Mammoth extraction failed (likely binary .doc):", err);
-        return "";
+        const data: any = await pdf(dataBuffer);
+        console.log("Converted Office Document Metadata:", {
+          numpages: data.numpages,
+          textLength: data.text?.length,
+        });
+        return data.text || "";
+      } catch (pdfError) {
+        // Fallback to mammoth for non-converted .docx files
+        try {
+          const result = await mammoth.extractRawText({ path: filePath });
+          return result.value;
+        } catch (err) {
+          console.warn("Document extraction failed:", err);
+          return "";
+        }
       }
     }
 
@@ -67,25 +83,6 @@ export const extractContent = async (
         data: { text },
       } = await Tesseract.recognize(filePath, "eng");
       return text;
-    }
-
-    if (type === "spreadsheets") {
-      try {
-        const workbook = xlsx.readFile(filePath);
-        let text = "";
-        workbook.SheetNames.forEach((sheetName) => {
-          const sheet = workbook.Sheets[sheetName];
-          // Use CSV format for better structure that AI can understand
-          const sheetContent = xlsx.utils.sheet_to_csv(sheet);
-          if (sheetContent.trim()) {
-            text += `Sheet: ${sheetName}\n${sheetContent}\n\n`;
-          }
-        });
-        return text;
-      } catch (err) {
-        console.error("Spreadsheet extraction error:", err);
-        return "";
-      }
     }
   }
   return "";

@@ -36,12 +36,10 @@ const signInSchema = z.object({
 function generateToken(userId: string): string {
   const payload = { id: userId };
 
-  // Generate a token valid for 1 hour (3600 seconds)
   const token = jwt.sign(payload, jwtsecret, { expiresIn: "30min" });
   return token;
 }
 
-//SignUp routes
 router.post("/signup", async (req, res) => {
   const { name, username, password } = req.body;
 
@@ -52,29 +50,24 @@ router.post("/signup", async (req, res) => {
       issues: validation.error.issues,
     });
   }
-  // Check if user already exists
   const existingUser = await UserModel.findOne({ username });
   if (existingUser) {
     return res.status(400).json({ error: "Username already exists" });
   }
 
-  // Hash the password before saving
   const hashedPassword = await hashPassword(password);
 
-  // Create a new user
   await UserModel.create({
     name: name,
     username: username,
     password: hashedPassword,
   });
-  // Logic to handle user signup
 
   res.status(201).json({
     message: "User signed up successfully",
   });
 });
 
-//SignIn routes
 router.post("/signin", async (req, res) => {
   const { username, password } = req.body;
   console.log(req.body);
@@ -86,12 +79,10 @@ router.post("/signin", async (req, res) => {
       issues: validation.error.issues,
     });
   }
-  // Find the user by username
   const user = await UserModel.find({ username });
   if (!user || user.length === 0) {
     return res.status(404).json({ error: "User not found" });
   }
-  // Compare the provided password with the stored hashed password
   const isPasswordValid = await bcrypt.compare(password, user[0].password);
 
   if (!isPasswordValid) {
@@ -106,11 +97,119 @@ router.post("/signin", async (req, res) => {
       message: "User signed in successfully",
     });
   }
-
-  // Logic to handle user sign-in
 });
 
-//logout route
+const updateProfileSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  bio: z.string().optional(),
+  profilePicture: z.string().url().optional(),
+});
+
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const user = await UserModel.findById(userId).select("-password -__v");
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error("Get profile error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+import multer from "multer";
+import os from "os";
+import fs from "fs";
+import { imageUpload } from "../utils/cloudinary";
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, file.fieldname + "-" + uniqueSuffix + "-" + file.originalname);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+router.put(
+  "/update",
+  authMiddleware,
+  upload.single("profilePicture"),
+  async (req, res) => {
+    try {
+      const userId = (req as any).userId;
+      const { username, email, bio } = req.body;
+      let { profilePicture } = req.body;
+
+      const file = req.file;
+      if (file) {
+        try {
+          const uploadResult = await imageUpload(file, "image");
+          if (uploadResult && uploadResult.secure_url) {
+            profilePicture = uploadResult.secure_url;
+          }
+        } catch (uploadError) {
+          console.error("Cloudinary upload failed:", uploadError);
+          return res.status(500).json({ error: "Failed to upload image" });
+        } finally {
+          if (file.path) {
+            fs.unlink(file.path, (err) => {
+              if (err) console.error("Error deleting temp file:", err);
+            });
+          }
+        }
+      }
+
+      const validation = updateProfileSchema.safeParse({
+        username,
+        email,
+        bio,
+        profilePicture,
+      });
+
+      if (!validation.success) {
+        return res.status(400).json({
+          error: validation.error.message,
+          issues: validation.error.issues,
+        });
+      }
+
+      if (email) {
+        const existingUser = await UserModel.findOne({
+          email,
+          _id: { $ne: userId },
+        });
+        if (existingUser) {
+          return res.status(400).json({ error: "Email already in use" });
+        }
+      }
+
+      const updatedUser = await UserModel.findByIdAndUpdate(
+        userId,
+        { $set: { username, email, bio, profilePicture } },
+        { new: true, runValidators: true },
+      ).select("-password -_id -__v");
+
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.status(200).json({
+        message: "Profile updated successfully",
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
 router.post("/logout", authMiddleware, async (req, res) => {
   const token = req.headers.authorization;
   if (token) {

@@ -14,6 +14,18 @@ const User = new mongoose.Schema({
     type: String,
     required: true,
   },
+  email: {
+    type: String,
+    unique: true,
+    sparse: true,
+    lowercase: true,
+  },
+  profilePicture: {
+    type: String,
+  },
+  bio: {
+    type: String,
+  },
 });
 
 const Tag = new mongoose.Schema({
@@ -37,7 +49,14 @@ const Tag = new mongoose.Schema({
   },
 });
 
-const contantTypes = ["youtube", "twitter", "reddit", "pinterest", "spotify"];
+const contantTypes = [
+  "youtube",
+  "pdf",
+  "doc",
+  "image",
+  "article",
+  "spreadsheets",
+];
 
 const Contant = new mongoose.Schema({
   link: {
@@ -51,9 +70,16 @@ const Contant = new mongoose.Schema({
   shareLink: { type: String },
   shareHash: { type: String },
   createdAt: { type: Date, default: Date.now },
-  transcription: { type: String},
-  vectorDB: {type:String},
-  aiChat: {type:String}
+  transcription: { type: String },
+  vectorDB: { type: [Number] },
+  aiChat: [
+    {
+      role: { type: String, enum: ["user", "model"], required: true },
+      content: { type: String, required: true },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
+  filePublicId: { type: String },
 });
 
 const linkSchema = new mongoose.Schema({
@@ -76,5 +102,3 @@ export default {
   ContantModel,
   LinkModel,
 };
-// This file defines the database schemas and models for the application using Mongoose.
-// It includes schemas for User, Tag, Contant, and Link, each with their respective fields and relationships.

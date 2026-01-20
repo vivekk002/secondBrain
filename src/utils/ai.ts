@@ -188,7 +188,13 @@ export const chatWithAIStream = async (
     throw new Error("Question cannot be empty");
   }
 
-  if (isFirstMessage(history)) {
+  // Check if the input is just a greeting
+  const isGreeting =
+    /^(hi|hello|hey|greetings|good morning|good afternoon|good evening)\b/i.test(
+      question.trim(),
+    );
+
+  if (isFirstMessage(history) && isGreeting) {
     const greeting =
       "Hello! 👋 I'm here to help you explore and understand your document. What would you like to know?";
     onChunk(greeting);

@@ -111,20 +111,31 @@ router.post(
       }
 
       if (!text || text.trim().length === 0) {
-        return res.status(400).json({
-          error:
-            "Failed to extract text from content. The file might be empty, encrypted, or the format is not supported.",
-        });
+        // Allow YouTube videos without transcripts
+        if (contentType === "youtube") {
+          console.warn("Saving YouTube video without transcript");
+          text = ""; // Empty transcript is OK for YouTube
+        } else {
+          return res.status(400).json({
+            error:
+              "Failed to extract text from content. The file might be empty, encrypted, or the format is not supported.",
+          });
+        }
       }
 
       let vectorDB: number[] = [];
-      try {
-        vectorDB = await generateEmbedding(text);
-      } catch (err) {
-        console.error("Embedding generation failed:", err);
-        return res.status(500).json({
-          error: "Failed to generate AI embeddings for this content.",
-        });
+      // Only generate embeddings if we have text content
+      if (text && text.trim().length > 0) {
+        try {
+          vectorDB = await generateEmbedding(text);
+        } catch (err) {
+          console.error("Embedding generation failed:", err);
+          return res.status(500).json({
+            error: "Failed to generate AI embeddings for this content.",
+          });
+        }
+      } else {
+        console.warn("Skipping embedding generation for content without text");
       }
 
       const newContent = await ContantModel.create({
@@ -149,6 +160,10 @@ router.post(
       res.status(201).json({
         data: newContent,
         message: "Content added successfully",
+        warning:
+          contentType === "youtube" && (!text || text.trim().length === 0)
+            ? "YouTube transcript unavailable. This may be due to: (1) Video has no captions, (2) IP blocking on cloud hosting (Render/AWS/etc). Video saved but won't be searchable via AI. For production deployments, consider using a proxy service to bypass IP restrictions. See README for details."
+            : undefined,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {

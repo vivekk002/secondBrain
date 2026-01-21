@@ -23,9 +23,11 @@ app.use(express.urlencoded({ extended: true }));
 import { errorHandler } from "./middleware/error";
 
 import chatbotRoutes from "./routes/chatbot";
+import searchRoutes from "./routes/searchRoutes";
 
 app.use("/api/v1", userRoutes);
 app.use("/api/v1/content", contentRoutes);
+app.use("/api/v1/search", searchRoutes);
 app.use("/api/v1/brain", brainRoutes);
 app.use("/api/v1/chat", chatbotRoutes);
 

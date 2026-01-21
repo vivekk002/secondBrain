@@ -13,7 +13,6 @@ export const extractContent = async (
 ): Promise<string> => {
   if (type === "youtube" && typeof file === "string") {
     try {
-      // Validate YouTube URL format
       const youtubeRegex =
         /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
       if (!youtubeRegex.test(file)) {
@@ -23,17 +22,13 @@ export const extractContent = async (
       const transcript = await YoutubeTranscript.fetchTranscript(file);
 
       if (!transcript || transcript.length === 0) {
-        throw new Error("No transcript available for this video");
+        return "";
       }
 
       return transcript.map((t: TranscriptItem) => t.text).join(" ");
     } catch (error: any) {
       console.error("YouTube transcript extraction failed:", error);
-      // Return a meaningful error message instead of empty string
-      throw new Error(
-        error.message ||
-          "Failed to fetch YouTube transcript. The video may not have captions available.",
-      );
+      return "";
     }
   }
 

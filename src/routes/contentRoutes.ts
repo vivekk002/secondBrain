@@ -99,7 +99,15 @@ router.post(
         text = await extractContent(file, contentType);
       } else if (link) {
         // Extract text content from the link
-        text = await extractContent(link, contentType);
+        try {
+          text = await extractContent(link, contentType);
+        } catch (extractError: any) {
+          return res.status(400).json({
+            error:
+              extractError.message ||
+              "Failed to extract content from the provided link",
+          });
+        }
       }
 
       if (!text || text.trim().length === 0) {

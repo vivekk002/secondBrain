@@ -12,8 +12,35 @@ export const extractContent = async (
   type: string,
 ): Promise<string> => {
   if (type === "youtube" && typeof file === "string") {
-    const transcript = await YoutubeTranscript.fetchTranscript(file);
-    return transcript.map((t: TranscriptItem) => t.text).join(" ");
+    try {
+      // Validate YouTube URL format
+      const youtubeRegex =
+        /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+      if (!youtubeRegex.test(file)) {
+        throw new Error("Invalid YouTube URL format");
+      }
+
+      const transcript = await YoutubeTranscript.fetchTranscript(file);
+
+      if (!transcript || transcript.length === 0) {
+        throw new Error("No transcript available for this video");
+      }
+
+      return transcript.map((t: TranscriptItem) => t.text).join(" ");
+    } catch (error: any) {
+      console.error("YouTube transcript extraction failed:", error);
+      // Return a meaningful error message instead of empty string
+      throw new Error(
+        error.message ||
+          "Failed to fetch YouTube transcript. The video may not have captions available.",
+      );
+    }
+  }
+
+  // Add article handling placeholder
+  if (type === "article" && typeof file === "string") {
+    // For now, return a placeholder - article scraping can be implemented later
+    return "Article content extraction not yet implemented";
   }
 
   if (Buffer.isBuffer(file)) {

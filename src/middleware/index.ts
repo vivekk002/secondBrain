@@ -1,27 +1,43 @@
 import { NextFunction, Response } from "express";
 import jwt from "jsonwebtoken";
-
-const jwtsecret: string = (() => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("Missing JWT_SECRET");
-  }
-
-  return process.env.JWT_SECRET;
-})();
-
-let tokenBlacklist: Set<string> = new Set();
-
-export const addToBlacklist = (token: string) => {
-  tokenBlacklist.add(token);
-};
-
-export const isTokenBlacklisted = (token: string): boolean => {
-  return tokenBlacklist.has(token);
-};
-
+import { BlacklistedTokenModel } from "../database";
 import { AuthenticatedRequest } from "../utils/types";
 
-const authMiddleware = (
+const jwtsecret: string = (() => {
+  if (!process.env.JWT_ACCESS_SECRET) {
+    throw new Error("Missing JWT_ACCESS_SECRET");
+  }
+
+  return process.env.JWT_ACCESS_SECRET;
+})();
+
+// Persisted in Mongo (with a TTL index) rather than an in-memory Set so
+// logout survives server restarts and works across multiple instances.
+export const addToBlacklist = async (token: string): Promise<void> => {
+  const decoded = jwt.decode(token) as { exp?: number } | null;
+  const expiresAt = decoded?.exp
+    ? new Date(decoded.exp * 1000)
+    : new Date(Date.now() + 30 * 60 * 1000);
+
+  try {
+    await BlacklistedTokenModel.updateOne(
+      { token },
+      { $setOnInsert: { token, expiresAt } },
+      { upsert: true },
+    );
+  } catch (err) {
+    console.error("Failed to persist blacklisted token:", err);
+  }
+};
+
+export const isTokenBlacklisted = async (token: string): Promise<boolean> => {
+  const found = await BlacklistedTokenModel.findOne({ token })
+    .select("_id")
+    .lean();
+  return !!found;
+};
+
+const authMiddleware = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction,
@@ -33,11 +49,11 @@ const authMiddleware = (
 
   const token = header as string;
 
-  if (isTokenBlacklisted(token)) {
-    return res.status(401).json({ error: "Token has been invalidated" });
-  }
-
   try {
+    if (await isTokenBlacklisted(token)) {
+      return res.status(401).json({ error: "Token has been invalidated" });
+    }
+
     const validToken = jwt.verify(token, jwtsecret) as {
       id: string;
     };

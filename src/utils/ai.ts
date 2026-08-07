@@ -26,9 +26,19 @@ export const generateEmbedding = async (text: string): Promise<number[]> => {
 };
 
 interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  // "model" is the role the DB (and Groq's own prior turns) stores for the
+  // AI's replies; it must map to Groq's "assistant" role, not "user".
+  role: "user" | "assistant" | "system" | "model";
   content: string;
 }
+
+const toGroqRole = (
+  role: ChatMessage["role"],
+): "user" | "assistant" | "system" => {
+  if (role === "system") return "system";
+  if (role === "assistant" || role === "model") return "assistant";
+  return "user";
+};
 
 const isFirstMessage = (history: ChatMessage[]): boolean => {
   return history.length === 0;
@@ -140,8 +150,7 @@ ${truncatedContext}
   const chatHistory: ChatCompletionMessageParam[] = history
     .slice(-10)
     .map((msg) => ({
-      role:
-        msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+      role: toGroqRole(msg.role),
       content: msg.content,
     }));
 
@@ -224,8 +233,7 @@ ${truncatedContext}`;
   const chatHistory: ChatCompletionMessageParam[] = history
     .slice(-10)
     .map((msg) => ({
-      role:
-        msg.role === "assistant" || msg.role === "system" ? msg.role : "user",
+      role: toGroqRole(msg.role),
       content: msg.content,
     }));
 

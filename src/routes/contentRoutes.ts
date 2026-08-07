@@ -9,6 +9,7 @@ import { AuthenticatedRequest } from "../utils/types";
 import multer from "multer";
 import os from "os";
 import fs from "fs";
+import path from "path";
 import { z } from "zod";
 import { NextFunction } from "express";
 
@@ -36,6 +37,12 @@ const ContentSchema = z
     },
   );
 
+const allowedExtensionsByType: Record<string, string[]> = {
+  pdf: [".pdf"],
+  doc: [".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"],
+  image: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"],
+};
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: os.tmpdir(),
@@ -46,6 +53,25 @@ const upload = multer({
   }),
   limits: {
     fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    // The "file" field is appended after "contentType" in the frontend's
+    // FormData, so req.body.contentType is already parsed by the time this
+    // runs. Extension-based (not MIME-based) because browsers send
+    // unreliable/generic MIME types for Office documents.
+    const contentType = req.body?.contentType as string | undefined;
+    const allowed = contentType && allowedExtensionsByType[contentType];
+    if (allowed) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (!allowed.includes(ext)) {
+        const error: any = new Error(
+          `File extension "${ext}" is not allowed for content type "${contentType}". Allowed: ${allowed.join(", ")}`,
+        );
+        error.statusCode = 400;
+        return cb(error);
+      }
+    }
+    cb(null, true);
   },
 });
 
@@ -111,10 +137,13 @@ router.post(
       }
 
       if (!text || text.trim().length === 0) {
-        // Allow YouTube videos without transcripts
-        if (contentType === "youtube") {
-          console.warn("Saving YouTube video without transcript");
-          text = ""; // Empty transcript is OK for YouTube
+        // YouTube (no captions / IP-blocked) and articles (paywalled,
+        // bot-blocked, or JS-rendered pages we can't scrape) can
+        // legitimately fail to yield text - save the link anyway rather
+        // than blocking the user, just without AI search/chat support.
+        if (contentType === "youtube" || contentType === "article") {
+          console.warn(`Saving ${contentType} content without extracted text`);
+          text = "";
         } else {
           return res.status(400).json({
             error:
@@ -151,7 +180,7 @@ router.post(
       for (const tag of tags) {
         const normalizedName = String(tag).toLowerCase().trim();
         await TagModel.findOneAndUpdate(
-          { name: normalizedName },
+          { name: normalizedName, userId: req.userId },
           { $addToSet: { contentId: newContent._id } },
           { upsert: true, new: true, setDefaultsOnInsert: true },
         );
@@ -161,8 +190,12 @@ router.post(
         data: newContent,
         message: "Content added successfully",
         warning:
-          contentType === "youtube" && (!text || text.trim().length === 0)
-            ? "YouTube transcript unavailable. This may be due to: (1) Video has no captions, (2) IP blocking on cloud hosting (Render/AWS/etc). Video saved but won't be searchable via AI. For production deployments, consider using a proxy service to bypass IP restrictions. See README for details."
+          !text || text.trim().length === 0
+            ? contentType === "youtube"
+              ? "YouTube transcript unavailable. This may be due to: (1) Video has no captions, (2) IP blocking on cloud hosting (Render/AWS/etc). Video saved but won't be searchable via AI. For production deployments, consider using a proxy service to bypass IP restrictions. See README for details."
+              : contentType === "article"
+                ? "Couldn't extract readable text from this article (it may be paywalled, bot-protected, or require JavaScript). Link saved but won't be searchable via AI."
+                : undefined
             : undefined,
       });
     } catch (error: any) {
@@ -185,16 +218,33 @@ router.get(
   "/",
   authMiddleware,
   async (req: AuthenticatedRequest, res: ExpressResponse) => {
-    const contents = await ContantModel.find({ userId: req.userId }).populate(
-      "userId",
-      "username",
+    const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+    const limit = Math.min(
+      200,
+      Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100),
     );
+    const skip = (page - 1) * limit;
 
-    const tags = await TagModel.find();
+    const [contents, total] = await Promise.all([
+      ContantModel.find({ userId: req.userId })
+        .populate("userId", "username")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      ContantModel.countDocuments({ userId: req.userId }),
+    ]);
+
+    const tags = await TagModel.find({ userId: req.userId });
 
     res.status(200).json({
       contents,
       tags,
+      pagination: {
+        page,
+        limit,
+        total,
+        hasMore: skip + contents.length < total,
+      },
       message: "Content fetched successfully",
     });
   },
@@ -289,15 +339,13 @@ router.post(
       }
 
       const shareHash = hashContent(8);
-      const shareLink = `http://localhost:3000/api/v1/content/share/${shareHash}`;
 
       await ContantModel.findByIdAndUpdate(contentId, {
-        shareLink: shareLink,
         shareHash: shareHash,
       });
 
       res.status(200).json({
-        shareLink: shareLink,
+        hash: shareHash,
         message: "Content shared successfully",
       });
     } catch (error) {
@@ -310,7 +358,9 @@ router.get("/share/:hash", async (req, res) => {
   const { hash } = req.params;
 
   try {
-    const content = await ContantModel.findOne({ shareHash: hash });
+    const content = await ContantModel.findOne({ shareHash: hash }).select(
+      "title link contentType createdAt",
+    );
 
     if (!content) {
       return res.status(404).json({ error: "Shared content not found" });

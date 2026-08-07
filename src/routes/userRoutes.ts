@@ -1,22 +1,33 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import { z } from "zod";
-import jwt from "jsonwebtoken";
-import { UserModel } from "../database";
+import rateLimit from "express-rate-limit";
+import { RefreshTokenModel, UserModel } from "../database";
 import authMiddleware, { addToBlacklist } from "../middleware";
 import { AuthenticatedRequest } from "../utils/types";
+import fs from "fs";
+import { imageUpload } from "../utils/cloudinary";
+import { verifyRefreshToken } from "../utils/generateToken";
+import { issueTokenPair, hashToken, clearRefreshCookie } from "../utils/session";
+import { changePasswordSchema, signInSchema, signUpSchema, updateProfileSchema } from "../utils/zodSchema";
+import { uploadToMulter } from "../utils/multer";
+
 
 const router = express.Router();
 
-const jwtsecret: string = (() => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("Missing JWT_SECRET");
-  }
+// Throttle credential-guessing endpoints. Keyed by IP; each failed or
+// successful attempt still counts, so this also caps brute-force speed.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please try again later." },
+});
 
-  return process.env.JWT_SECRET;
-})();
 
-const saltRounds = 16;
+
+const saltRounds = 12;
 
 async function hashPassword(password: string): Promise<string> {
   const hash = await bcrypt.hash(password, saltRounds);
@@ -24,24 +35,13 @@ async function hashPassword(password: string): Promise<string> {
   return hash;
 }
 
-const signUpSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(8, "Password must be at least 8 characters long"),
-});
-const signInSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(8, "Password is wrong"),
-});
 
-function generateToken(userId: string): string {
-  const payload = { id: userId };
 
-  const token = jwt.sign(payload, jwtsecret, { expiresIn: "30min" });
-  return token;
-}
 
-router.post("/signup", async (req, res) => {
+
+
+
+router.post("/signup", authLimiter, async (req, res) => {
   const { name, username, password } = req.body;
 
   const validation = signUpSchema.safeParse({ name, username, password });
@@ -69,7 +69,7 @@ router.post("/signup", async (req, res) => {
   });
 });
 
-router.post("/signin", async (req, res) => {
+router.post("/signin", authLimiter, async (req, res) => {
   const { username, password } = req.body;
   console.log(req.body);
 
@@ -89,23 +89,49 @@ router.post("/signin", async (req, res) => {
   if (!isPasswordValid) {
     return res.status(401).json({ error: "Invalid password" });
   } else {
-    const token = generateToken(user[0]._id.toString());
+    const accessToken = await issueTokenPair(res, user[0]._id.toString());
 
     res.status(200).json({
       name: user[0].name,
       username: user[0].username,
-      token: token,
+      token: accessToken,
       message: "User signed in successfully",
     });
   }
 });
 
-const updateProfileSchema = z.object({
-  name: z.string().min(1).optional(),
-  email: z.string().email().optional(),
-  bio: z.string().optional(),
-  profilePicture: z.string().url().optional(),
+router.post("/refresh", async (req, res) => {
+  const token = req.cookies?.refreshtoken;
+  if (!token) {
+    return res.status(401).json({ error: "Refresh token missing" });
+  }
+
+  let decoded: { sub: string };
+  try {
+    decoded = verifyRefreshToken(token);
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
+
+  const storedToken = await RefreshTokenModel.findOne({ tokenHash: hashToken(token) });
+
+  if (!storedToken || storedToken.revoked) {
+    // Either this token was never issued, or it's already been rotated
+    // away and is being reused - treat both as theft and kill every
+    // session for this user rather than trusting the token further.
+    await RefreshTokenModel.updateMany({ userId: decoded.sub }, { revoked: true });
+    return res.status(401).json({ error: "Refresh token reuse detected" });
+  }
+
+  storedToken.revoked = true;
+  await storedToken.save();
+
+  const accessToken = await issueTokenPair(res, decoded.sub);
+
+  res.status(200).json({ token: accessToken });
 });
+
+
 
 router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
   try {
@@ -121,30 +147,18 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-import multer from "multer";
-import os from "os";
-import fs from "fs";
-import { imageUpload } from "../utils/cloudinary";
 
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: os.tmpdir(),
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, file.fieldname + "-" + uniqueSuffix + "-" + file.originalname);
-    },
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
+
+
 
 router.put(
   "/update",
   authMiddleware,
-  upload.single("profilePicture"),
+  uploadToMulter.single("profilePicture"),
   async (req: AuthenticatedRequest, res) => {
     try {
       const userId = req.userId;
-      const { username, email, bio } = req.body;
+      const { name, email, bio } = req.body;
       let { profilePicture } = req.body;
 
       const file = req.file;
@@ -167,7 +181,7 @@ router.put(
       }
 
       const validation = updateProfileSchema.safeParse({
-        username,
+        name,
         email,
         bio,
         profilePicture,
@@ -192,7 +206,7 @@ router.put(
 
       const updatedUser = await UserModel.findByIdAndUpdate(
         userId,
-        { $set: { username, email, bio, profilePicture } },
+        { $set: { name, email, bio, profilePicture } },
         { new: true, runValidators: true },
       ).select("-password -_id -__v");
 
@@ -214,31 +228,65 @@ router.put(
 router.post("/logout", authMiddleware, async (req, res) => {
   const token = req.headers.authorization;
   if (token) {
-    addToBlacklist(token);
-    console.log("Token blacklisted:", token);
+    await addToBlacklist(token);
   }
+
+  const refreshToken = req.cookies?.refreshtoken;
+  if (refreshToken) {
+    await RefreshTokenModel.updateOne(
+      { tokenHash: hashToken(refreshToken) },
+      { revoked: true },
+    );
+  }
+  clearRefreshCookie(res);
+
   res.status(200).json({ message: "Logged out successfully" });
 });
 
-router.post("/reset-password", async (req, res) => {
-  try {
-    const { username, newPassword } = req.body;
 
-    if (!username || !newPassword) {
-      return res.status(400).json({ error: "fill the required fields" });
+// Requires an authenticated session and proof of the current password.
+// A true pre-auth "forgot password" flow needs email/SMS verification
+// infrastructure this project doesn't have yet; exposing an unauthenticated
+// reset keyed only on username would let anyone take over any account.
+router.post(
+  "/change-password",
+  authLimiter,
+  authMiddleware,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const validation = changePasswordSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: validation.error.message,
+          issues: validation.error.issues,
+        });
+      }
+      const { currentPassword, newPassword } = validation.data;
+
+      const user = await UserModel.findById(req.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const isCurrentPasswordValid = await bcrypt.compare(
+        currentPassword,
+        user.password,
+      );
+      if (!isCurrentPasswordValid) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const hashedPassword = await hashPassword(newPassword);
+      await UserModel.updateOne(
+        { _id: user._id },
+        { password: hashedPassword },
+      );
+      return res.status(200).json({ message: "Password updated" });
+    } catch (error) {
+      console.log("error during password change", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
-    const user = await UserModel.findOne({ username });
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    const hashedPassword = await hashPassword(newPassword);
-    user.password = hashedPassword;
-    await UserModel.updateOne({ _id: user._id }, { password: hashedPassword });
-    return res.status(200).json({ message: "Password updated" });
-  } catch (error) {
-    console.log("error during password reset", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
+  },
+);
 
 export default router;

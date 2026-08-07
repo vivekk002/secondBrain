@@ -1,11 +1,57 @@
 import fs from "fs";
 import * as pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import Tesseract from "tesseract.js";
+import { createWorker, Worker } from "tesseract.js";
+import axios from "axios";
+import * as cheerio from "cheerio";
 import { YoutubeTranscript } from "youtube-transcript-plus";
 import { TranscriptItem } from "./types";
 
 const pdf = (pdfParse as any).default || pdfParse;
+
+// Spinning up a fresh Tesseract worker (loading the WASM runtime + language
+// data) per image takes several seconds, so we keep one warm worker around
+// for the life of the process instead of one-shot `Tesseract.recognize`.
+// tesseract.js queues concurrent recognize() calls on a worker internally,
+// so this is safe under concurrent requests, just not parallel across them.
+let ocrWorkerPromise: Promise<Worker> | null = null;
+
+const getOcrWorker = (): Promise<Worker> => {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = createWorker("eng");
+  }
+  return ocrWorkerPromise;
+};
+
+process.on("SIGTERM", async () => {
+  if (ocrWorkerPromise) {
+    (await ocrWorkerPromise).terminate().catch(() => {});
+  }
+});
+
+const extractArticleText = async (url: string): Promise<string> => {
+  const response = await axios.get(url, {
+    timeout: 15000,
+    maxContentLength: 10 * 1024 * 1024,
+    headers: {
+      // Some sites block requests with no browser-like User-Agent.
+      "User-Agent":
+        "Mozilla/5.0 (compatible; SecondBrainBot/1.0; +https://github.com)",
+    },
+    responseType: "text",
+  });
+
+  const $ = cheerio.load(response.data);
+  $("script, style, nav, header, footer, aside, noscript, iframe, svg").remove();
+
+  const container = $("article").length ? $("article") : $("body");
+  const text = container
+    .text()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text;
+};
 
 export const extractContent = async (
   file: Express.Multer.File | string | Buffer,
@@ -32,10 +78,13 @@ export const extractContent = async (
     }
   }
 
-  // Add article handling placeholder
   if (type === "article" && typeof file === "string") {
-    // For now, return a placeholder - article scraping can be implemented later
-    return "Article content extraction not yet implemented";
+    try {
+      return await extractArticleText(file);
+    } catch (error) {
+      console.error("Article extraction failed:", error);
+      return "";
+    }
   }
 
   if (Buffer.isBuffer(file)) {
@@ -101,9 +150,10 @@ export const extractContent = async (
     }
 
     if (type === "image") {
+      const worker = await getOcrWorker();
       const {
         data: { text },
-      } = await Tesseract.recognize(filePath, "eng");
+      } = await worker.recognize(filePath);
       return text;
     }
   }

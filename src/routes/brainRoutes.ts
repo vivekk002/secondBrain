@@ -15,21 +15,20 @@ router.post(
     if (share) {
       const existingLink = await LinkModel.findOne({ userId: req.userId });
       if (existingLink) {
-        const hash = existingLink.hash;
         return res.status(200).json({
           message: "Sharable link already exists",
-          shareLink: `http://localhost:3000/api/v1/brain/${hash}`,
+          hash: existingLink.hash,
         });
       } else {
         const hash = hashContent(10);
-        const newLink = await LinkModel.create({
+        await LinkModel.create({
           hash,
           userId: req.userId,
         });
 
         return res.status(200).json({
           message: "Sharable link created successfully",
-          shareLink: `http://localhost:3000/api/v1/brain/${hash}`,
+          hash,
         });
       }
     } else {
@@ -37,9 +36,24 @@ router.post(
 
       return res.status(200).json({
         message: "Sharable link removed successfully",
-        shareLink: null,
+        hash: null,
       });
     }
+  },
+);
+
+// Must be registered before GET /:sharelink, otherwise Express would match
+// this path as a sharelink lookup with sharelink="share" (this was a
+// pre-existing bug: the frontend's share-status check always 404'd).
+router.get(
+  "/share",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: ExpressResponse) => {
+    const existingLink = await LinkModel.findOne({ userId: req.userId });
+    res.status(200).json({
+      isShared: !!existingLink,
+      hash: existingLink?.hash || null,
+    });
   },
 );
 
@@ -47,7 +61,6 @@ router.get(
   "/:sharelink",
   async (req: AuthenticatedRequest, res: ExpressResponse) => {
     const { sharelink } = req.params;
-    console.log("Received sharelink:", sharelink);
 
     if (!sharelink) {
       return res.status(400).json({ error: "Sharable link is required" });
@@ -58,7 +71,9 @@ router.get(
         .status(404)
         .json({ error: "either the link not exit or it's incorrect" });
     }
-    const contents = await ContantModel.find({ userId: Link.userId });
+    const contents = await ContantModel.find({ userId: Link.userId }).select(
+      "title link contentType createdAt",
+    );
     const user = await UserModel.findOne({ _id: Link.userId });
     res.status(200).json({
       name: user?.name,

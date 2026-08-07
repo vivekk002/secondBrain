@@ -41,7 +41,7 @@ router.post(
 
       const answer = await chatWithAI(
         content.transcription,
-        history as any[],
+        history.map((msg) => ({ role: msg.role, content: msg.content })),
         question,
       );
 

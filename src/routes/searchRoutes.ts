@@ -88,7 +88,8 @@ router.post(
           };
         })
         .filter((item) => item.score > 0.25)
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 50);
 
       res.status(200).json({
         results,
